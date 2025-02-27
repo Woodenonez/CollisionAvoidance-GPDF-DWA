@@ -59,12 +59,12 @@ class MainBase:
             print(f'[{self.__class__.__name__}] Loading configuration...')
         if self.tracker_type == 'mpc':
             self.config_tracker = MpcConfiguration.from_yaml(config_tracker_path)
-        elif self.tracker_type in ['dwa', 'dwa-gpdf']:
+        elif self.tracker_type in ['dwa', 'dwa-gpdf', 'dwa-pred']:
             self.config_tracker = DwaConfiguration.from_yaml(config_tracker_path)
             
         if self.planner_type == 'teb':
             self.config_planner = TebConfiguration.from_yaml(config_planner_path)
-        elif self.planner_type in ['dwa', 'dwa-gpdf']:
+        elif self.planner_type in ['dwa', 'dwa-gpdf', 'dwa-pred']:
             self.config_planner = DwaConfiguration.from_yaml(config_planner_path)
         self.config_robot = CircularRobotSpecification.from_yaml(config_robot_path)
         self.config_human = PedestrianSpecification.from_yaml(config_human_path)
@@ -110,7 +110,7 @@ class MainBase:
                 controller = TrajectoryTrackerMPC(self.config_tracker, self.config_robot, robot_id=rid, verbose=False)
                 controller.load_motion_model(robot.motion_model)
                 # controller.set_monitor(monitor_on=False)
-            elif self.tracker_type in ['dwa', 'dwa-gpdf']:
+            elif 'dwa' in self.tracker_type:
                 controller = TrajectoryTrackerDWA(self.config_tracker, self.config_robot, robot_id=rid, verbose=False)
                 controller.load_motion_model(robot.motion_model)
             visualizer = CircularObjectVisualizer(self.config_robot.vehicle_width/2, indicate_angle=True)
@@ -155,7 +155,7 @@ class MainBase:
         """
         Args:
             planner_type: The type of the planner, 'none' or 'teb'.
-            tracker_type: The type of the trajectory tracker, 'mpc' or 'rpp'.
+            tracker_type: The type of the trajectory tracker, 'mpc' or 'dwa'.
         """
         self._planner_type = planner_type
         self._tracker_type = tracker_type
@@ -305,11 +305,11 @@ class MainBase:
             controller = self.robot_manager.get_controller(rid)
             visualizer = self.robot_manager.get_visualizer(rid)
 
-            if (len(self.robot_manager) > 1) and self.tracker_type in ['mpc', 'dwa', 'dwa-gpdf']:
+            if (len(self.robot_manager) > 1) and self.tracker_type in ['mpc', 'dwa', 'dwa-gpdf', 'dwa-pred']:
                 if self.tracker_type == 'mpc':
                     default_value = -10.0
                     n_others = self.config_tracker.Nother
-                elif self.tracker_type in ['dwa', 'dwa-gpdf']:
+                elif 'dwa' in self.tracker_type:
                     default_value = np.inf
                     n_others = len(self.robot_manager)-1
                 other_robot_states = self.robot_manager.get_other_robot_states(
@@ -317,15 +317,17 @@ class MainBase:
                     n_state=self.config_tracker.ns, 
                     n_horizon=self.config_tracker.N_hor, 
                     n_others=n_others,
-                    sep=(self.tracker_type in ['dwa', 'dwa-gpdf']),
+                    sep=('dwa' in self.tracker_type),
                     default=default_value
                 )
             else:
                 other_robot_states = None
 
-            if self.tracker_type in ['dwa', 'dwa-gpdf'] and other_robot_states is not None:
+            if ('dwa' in self.tracker_type) and (other_robot_states is not None):
                 assert isinstance(other_robot_states, dict)
+                other_robot_states_pred = []
                 for other_id, other_states in other_robot_states.items():
+                    other_robot_states_pred.append(other_states)
                     other_robot_states_np = np.asarray([x for x in other_states if x != default_value]).reshape(-1, 3)
                     other_robot_obstacle = np.unique(other_robot_states_np[:, :2], axis=0)
                     if other_robot_obstacle.shape[0] == 1:
@@ -338,7 +340,11 @@ class MainBase:
                             axis=0
                         )
                     self.gpdf_env.add_gpdf_after_interp(index=f'other_robots_{other_id}', pc_coords=other_robot_obstacle, interp_res=0.02)
-
+                try:
+                    other_robot_states_pred_np = np.array(other_robot_states_pred)[:, :, None].reshape(len(other_robot_states), -1, 3)
+                    other_robot_states_pred_np = np.transpose(other_robot_states_pred_np, axes=[1, 0, 2])[:, :, :2]
+                except ValueError:
+                    other_robot_states_pred_np = np.array([robot.state[:2] for robot in self.robot_manager.get_all_robots() if robot.id_ != rid])
 
             controller.set_current_state(robot.state)
             if controller.finishing:
@@ -350,19 +356,27 @@ class MainBase:
                 self.generic_planner.set_ref_states(robot.state, ref_states, ref_speed)
                 ref_states, _ = self.generic_planner.run_step(obstacles=dynamic_obstacles,
                                                               obstacle_radius=self.config_human.human_width*1.5)
-            elif self.planner_type in ['dwa', 'dwa-gpdf']:
+            elif self.planner_type in ['dwa', 'dwa-gpdf', 'dwa-pred']:
                 assert isinstance(self.generic_planner, TrajectoryPlannerDWA)
                 self.generic_planner.load_init_states(robot.state, goal_state=self.robot_manager.get_goal_state(rid))
                 self.generic_planner.set_ref_states(ref_states, ref_speed=ref_speed)
 
-                _, ref_states, _, _ = self.generic_planner.run_step(
-                    enable_gpdf=(self.tracker_type=='dwa-gpdf'),
-                    static_obstacles=self.static_obstacles,
-                    dyn_obstacle_list=dynamic_obstacles,
-                    other_robot_states=[robot.state[:2] for robot in self.robot_manager.get_all_robots() if robot.id_ != rid],
-                    gpdf_env=self.gpdf_env,
-                    last_action=controller.past_actions[-1] if len(controller.past_actions) > 0 else None,
-                )
+                if self.tracker_type == 'dwa-pred':
+                    _, ref_states, _, _ = self.generic_planner.run_step(
+                        enable_gpdf=(self.tracker_type=='dwa-gpdf'),
+                        static_obstacles=self.static_obstacles,
+                        dyn_obstacle_list=other_robot_states_pred_np.tolist(),
+                        gpdf_env=self.gpdf_env,
+                        last_action=controller.past_actions[-1] if len(controller.past_actions) > 0 else None,
+                    )
+                else:
+                    _, ref_states, _, _ = self.generic_planner.run_step(
+                        enable_gpdf=(self.tracker_type=='dwa-gpdf'),
+                        static_obstacles=self.static_obstacles,
+                        dyn_obstacle_list=[robot.state[:2] for robot in self.robot_manager.get_all_robots() if robot.id_ != rid],
+                        gpdf_env=self.gpdf_env,
+                        last_action=controller.past_actions[-1] if len(controller.past_actions) > 0 else None,
+                    )
 
 
             controller.set_ref_states(ref_states, ref_speed=ref_speed)
@@ -371,20 +385,29 @@ class MainBase:
             if self.tracker_type == 'mpc':
                 dynamic_obstacles_with_distance = [list(human.state[:2])+[self.config_human.human_width] for human in self.humans] # [[x1, y1, r], [x2, y2, r], ...]
                 assert isinstance(controller, TrajectoryTrackerMPC)
-                actions, pred_states, current_refs, debug_info = controller.run_step(static_obstacles=self.static_obstacles_mpc,
-                                                                                     dyn_obstacle_list=dynamic_obstacles_with_distance,
-                                                                                     other_robot_states=other_robot_states,
-                                                                                     map_updated=True)
+                actions, pred_states, current_refs, debug_info = controller.run_step(
+                    static_obstacles=self.static_obstacles_mpc,
+                    dyn_obstacle_list=dynamic_obstacles_with_distance,
+                    other_robot_states=other_robot_states,
+                    map_updated=True)
                 action = actions[-1]
-            elif self.tracker_type in ['dwa', 'dwa-gpdf']:
+            elif 'dwa' in self.tracker_type:
                 assert isinstance(controller, TrajectoryTrackerDWA)
-                action, pred_states, current_refs, debug_info = controller.run_step(
-                    enable_gpdf=(self.tracker_type=='dwa-gpdf'),
-                    static_obstacles=self.static_obstacles,
-                    dyn_obstacle_list=dynamic_obstacles,
-                    other_robot_states=[robot.state[:2] for robot in self.robot_manager.get_all_robots() if robot.id_ != rid],
-                    gpdf_env=self.gpdf_env,
-                )
+                if self.tracker_type == 'dwa-pred':
+                    action, pred_states, current_refs, debug_info = controller.run_step(
+                        enable_gpdf=(self.tracker_type=='dwa-gpdf'),
+                        static_obstacles=self.static_obstacles,
+                        dyn_obstacle_list=other_robot_states_pred_np.tolist(),
+                        gpdf_env=self.gpdf_env,
+                        last_action=controller.past_actions[-1] if len(controller.past_actions) > 0 else None,
+                    )
+                else:
+                    action, pred_states, current_refs, debug_info = controller.run_step(
+                        enable_gpdf=(self.tracker_type=='dwa-gpdf'),
+                        static_obstacles=self.static_obstacles,
+                        dyn_obstacle_list=[robot.state[:2] for robot in self.robot_manager.get_all_robots() if robot.id_ != rid],
+                        gpdf_env=self.gpdf_env,
+                    )
             solve_tracker_time = timer() - start_tracker_time
             self.evaluator.append_tracker_solve_time(rid, solve_tracker_time)
 
@@ -425,7 +448,7 @@ class MainBase:
 
         if self.viz:
             tracker_viz = []
-            if self.tracker_type in ['dwa', 'dwa-gpdf']:
+            if 'dwa' in self.tracker_type:
                 all_trajs = debug_info['all_trajectories']
                 ok_trajs = debug_info['ok_trajectories']
                 ok_cost = debug_info['ok_costs']
@@ -560,26 +583,28 @@ if __name__ == '__main__':
     scenario_index_list = [
         # (1, 1, 3), 
         # (1, 2, 2), 
-        (1, 3, 1), 
+        # (1, 3, 1), 
         # (2, 1, 2), 
         # (2, 1, 3),
-        # (3, 1, 1), 
+        (3, 1, 1), 
         # (4, 1, 1),
     ]
     tracker_type_list = [
         'dwa-gpdf', 
-        # 'dwa'
+        # 'dwa',
+        # 'dwa-pred', 
+        # 'mpc',
     ]
 
     for tracker_type in tracker_type_list:
         for scenario_index in scenario_index_list:
-            # tracker_type = 'dwa-gpdf' # 'mpc', 'dwa', 'dwa-gpdf', 'rpp'
-            planner_type = None # None, 'teb', 'dwa', 'dwa-gpdf'
+            # tracker_type = 'dwa-gpdf' # 'mpc', 'dwa', 'dwa-pred', 'dwa-gpdf', 'rpp'
+            planner_type = None # None, 'teb', 'dwa', 'dwa-pred', 'dwa-gpdf'
             # scenario_index = (2, 1, 3)
             pedestrian_model = 'None' # None, 'sf', 'minisf'
-            auto_run = False 
+            auto_run = True 
             map_only = True
-            save_video_name = None #f'./Demo/{scenario_index[0]}_{scenario_index[1]}_{scenario_index[2]}_{tracker_type}_{planner_type}.avi'
+            save_video_name = None#f'./Demo/{scenario_index[0]}_{scenario_index[1]}_{scenario_index[2]}_{tracker_type}_{planner_type}.avi'
             evaluation = False
             repeat = 1
             time_step = 50.0 # seconds. 200 for long-term, 50 for short-term
@@ -591,7 +616,7 @@ if __name__ == '__main__':
                 cfg_planner_path = 'none'
             elif planner_type == 'teb':
                 cfg_planner_path = os.path.join(project_dir, 'config', 'teb.yaml')
-            elif planner_type in ['dwa', 'dwa-gpdf']:
+            elif planner_type in ['dwa', 'dwa-gpdf', 'dwa-pred']:
                 cfg_planner_path = os.path.join(project_dir, 'config', 'dwa.yaml')
             else:
                 raise ValueError(f'Invalid planner type: {planner_type}')
@@ -599,7 +624,7 @@ if __name__ == '__main__':
             ### Check tracker type
             if tracker_type == 'mpc':
                 cfg_tracker_path = os.path.join(project_dir, 'config', 'mpc_fast.yaml')
-            elif tracker_type in ['dwa', 'dwa-gpdf']:
+            elif tracker_type in ['dwa', 'dwa-gpdf', 'dwa-pred']:
                 cfg_tracker_path = os.path.join(project_dir, 'config', 'dwa.yaml')
             elif tracker_type == 'rpp':
                 cfg_tracker_path = os.path.join(project_dir, 'config', 'rpp.yaml')

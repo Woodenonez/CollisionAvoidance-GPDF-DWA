@@ -134,7 +134,7 @@ class TrajectoryTracker:
             decay_action = np.array([action[0], action[1]*max(1.0, (N_hor-i)/N_hor)])
             x = self.motion_model(x, decay_action, self.config.ts)
             trajectory = np.vstack((trajectory, x))
-        return trajectory
+        return trajectory[1:]
 
 
     def calc_cost_goal_direction(self, trajectory: np.ndarray, goal_state: np.ndarray):
@@ -160,7 +160,7 @@ class TrajectoryTracker:
 
     def calc_cost_ref_deviation(self, trajectory: np.ndarray, ref_traj: np.ndarray):
         """Calculate the cost based on the reference trajectory."""
-        dists = np.linalg.norm(trajectory[1:, :2] - ref_traj[:, :2], axis=1)
+        dists = np.linalg.norm(trajectory[:, :2] - ref_traj[:, :2], axis=1)
         cost = np.sum(dists)/self.N_hor * self.config.q_ref_deviation
         if np.max(dists) > 5.0:
             return cost + 10.0
@@ -198,8 +198,10 @@ class TrajectoryTracker:
 
     def calc_cost_dynamic_obstacles_steps(self, trajectory: np.ndarray, dynamic_obstacles: list[list[tuple]], thre:float=0.0):
         all_step_min_distances = []
+        if len(dynamic_obstacles) == 0:
+            return 0.0
         for i, obs in enumerate(dynamic_obstacles):
-            set1 = np.expand_dims(trajectory[i, :2], axis=1)
+            set1 = np.expand_dims(trajectory[[i], :2], axis=1)
             set2 = np.expand_dims(np.array(obs), axis=0)
             distances = np.sqrt(np.sum((set1 - set2)**2, axis=-1))
             min_distances = np.min(distances) * np.sqrt(i+1)
@@ -230,7 +232,7 @@ class TrajectoryTracker:
         min_dist = np.min(dist_set)
         if min_dist < min_safe_dist:
             return np.inf, np.inf
-        if min_dist > min_safe_dist*2 + self.robot_spec.vehicle_margin + self.robot_spec.social_margin:
+        if min_dist > 1.0: #min_safe_dist*2 + self.robot_spec.vehicle_margin + self.robot_spec.social_margin:
             return 0.0, 0.0
         dist_cost = 1.0 / min_dist * self.config.q_stc_obstacle
 
@@ -246,15 +248,16 @@ class TrajectoryTracker:
         cost_ref_deviation = self.calc_cost_ref_deviation(trajectory, ref_path)
         cost_static_obs = 0.0
         cost_dynamic_obs = 0.0
+        safe_thre = self.robot_spec.vehicle_width + self.robot_spec.vehicle_margin
         if static_obstacles is not None:
             cost_static_obs = self.calc_cost_static_obstacles(trajectory, static_obstacles)
         if dynamic_obstacles is not None:
             if np.array(dynamic_obstacles).ndim == 2:
-                cost_dynamic_obs = self.calc_cost_dynamic_obstacles(trajectory, dynamic_obstacles) # type: ignore
+                cost_dynamic_obs = self.calc_cost_dynamic_obstacles(trajectory, dynamic_obstacles, thre=safe_thre) # type: ignore
             elif np.array(dynamic_obstacles).ndim == 3:
                 cost_dynamic_obs = (
-                    self.calc_cost_dynamic_obstacles_steps(trajectory, dynamic_obstacles[1:]) + # type: ignore
-                    self.calc_cost_dynamic_obstacles(trajectory, dynamic_obstacles[0]) # type: ignore
+                    self.calc_cost_dynamic_obstacles_steps(trajectory, dynamic_obstacles[1:], thre=safe_thre) + # type: ignore
+                    self.calc_cost_dynamic_obstacles(trajectory, dynamic_obstacles[0], thre=safe_thre) # type: ignore
                 )
             else:
                 cost_dynamic_obs = 0.0
@@ -278,11 +281,9 @@ class TrajectoryTracker:
                 min_safe_dist=self.robot_spec.vehicle_width/2)
             cost_gpdf_obs = dist_cost + sa_cost
 
-        if cost_gpdf_obs < 0.1:
-            cost_ref_deviation *= 10
         total_cost = cost_speed + cost_goal_dir + cost_ref_deviation + cost_gpdf_obs
-        if total_cost < np.inf:
-            print(f"[{self.__class__.__name__}-{self.robot_id}] Cost: {total_cost:.2f}, Speed: {cost_speed:.2f}, Goal: {cost_goal_dir:.2f}, Ref: {cost_ref_deviation:.2f}, Dist: {dist_cost:.2f}, SA: {sa_cost:.2f}")
+        # if total_cost < np.inf:
+        #     print(f"[{self.__class__.__name__}-{self.robot_id}] Cost: {total_cost:.2f}, Speed: {cost_speed:.2f}, Goal: {cost_goal_dir:.2f}, Ref: {cost_ref_deviation:.2f}, Dist: {dist_cost:.2f}, SA: {sa_cost:.2f}")
         return total_cost
 
 
@@ -396,13 +397,6 @@ class TrajectoryTracker:
             ref_states: The reference states.
             debug_info: Debug information.
         """
-        all_dyn_objs = []
-        if other_robot_states is not None:
-            all_dyn_objs += other_robot_states
-        if dyn_obstacle_list is not None:
-            all_dyn_objs += dyn_obstacle_list
-        if len(all_dyn_objs) == 0:
-            all_dyn_objs = None # type: ignore
 
         ### Correct the reference speed ###
         dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
@@ -437,7 +431,7 @@ class TrajectoryTracker:
                     np.array(self.ref_states), 
                     self.final_goal, 
                     static_obstacles, 
-                    all_dyn_objs,
+                    dyn_obstacle_list,
                 )
                 if cost < np.inf:
                     ok_trajectories.append(trajectory)

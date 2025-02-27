@@ -267,14 +267,14 @@ def generate_map_scene_3(sub_index: int, scene_option: int):
     robot_starts = [
         np.array([0.0, 0.0, math.radians(45)]),
         np.array([10.0, 10.0, math.radians(-135)]),
-        np.array([0.0, 10.0, math.radians(-45)]),
-        np.array([10.0, 0.0, math.radians(135)]),
+        # np.array([0.0, 10.0, math.radians(-45)]),
+        # np.array([10.0, 0.0, math.radians(135)]),
     ]
     robot_goals = [
         [(10.0, 10.0)],
         [(0.0, 0.0)],
-        [(10.0, 0.0)],
-        [(0.0, 10.0)],
+        # [(10.0, 0.0)],
+        # [(0.0, 10.0)],
     ]
     boundary = [(-5.0, -5.0), (15.0, -5.0), (15.0, 15.0), (-5.0, 15.0)]
     obstacles_list = []
