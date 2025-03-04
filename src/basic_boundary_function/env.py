@@ -43,6 +43,7 @@ class GPDFEnv:
         segment = np.linspace(p1, p2, int(np.linalg.norm(p2-p1)/interp_res)+1)
         new_pc_coords.extend(segment[:-1])
         self.add_gpdf(index, pc_coords=np.array(new_pc_coords))
+        return np.array(new_pc_coords)
 
         
     def add_gpdfs(self, indices:list[Union[int, str]], gpdfs:Optional[list[GPDF]]=None, pc_coords_list:Optional[list[np.ndarray]]=None):

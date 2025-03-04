@@ -142,18 +142,13 @@ class TrajectoryTracker:
         """
         desired_dir = math.atan2(goal_state[1] - trajectory[0, 1], goal_state[0] - trajectory[0, 0])
         current_dir = math.atan2(trajectory[-1, 1] - trajectory[0, 1], trajectory[-1, 0] - trajectory[0, 0])
-        cost_angle = abs(math.atan2(math.sin(desired_dir - current_dir), math.cos(desired_dir - current_dir)))
+        cost_angle = abs(math.atan2(math.sin(desired_dir - current_dir), 
+                                    math.cos(desired_dir - current_dir)))
         min_dist = np.min(np.linalg.norm(trajectory[:,:2] - goal_state[:2], axis=1))
         extra_cost = 0.0
         if min_dist > 0.1:
             extra_cost = 10.0
         return cost_angle * self.config.q_goal_dir + extra_cost
-        # dx = goal_state[0] - trajectory[-1, 0]
-        # dy = goal_state[1] - trajectory[-1, 1]
-        # error_angle = math.atan2(dy, dx)
-        # cost_angle = error_angle - trajectory[-1, 2]
-        # cost = abs(math.atan2(math.sin(cost_angle), math.cos(cost_angle)))
-        # return cost * self.config.q_goal_dir
 
     def calc_cost_speed(self, action: np.ndarray):
         return abs(action[0] - self.base_speed) * self.config.q_speed
@@ -165,10 +160,6 @@ class TrajectoryTracker:
         if np.max(dists) > 5.0:
             return cost + 10.0
         return cost
-        # dists = utils_geo.lineseg_dists(trajectory[-1,:2], ref_traj[:-1,:2], ref_traj[1:,:2])
-        # dists[np.isnan(dists)] = np.inf
-        # cost = np.min(dists) * self.config.q_ref_deviation
-        # return cost
 
 
     def calc_cost_static_obstacles(self, trajectory: np.ndarray, static_obstacles: list[list[tuple]], thre:float=0.0):
@@ -218,7 +209,7 @@ class TrajectoryTracker:
         sa_min = np.radians(120)
         sa_max = np.radians(180)
         dire = np.concatenate((np.cos(traj[:, 2]).reshape(-1, 1), np.sin(traj[:, 2]).reshape(-1, 1)), axis=1)
-        cos_angle = np.clip(np.sum(dire * grad_set, axis=1), -1, 1)
+        cos_angle = np.clip(np.sum(dire * grad_set, axis=1), -1, 1) # clip for numerical stability
         safety_angle = abs(np.arccos(cos_angle))
         safety_angle_pow = safety_angle-sa_min
         safety_angle_pow[safety_angle_pow < 0] = 0

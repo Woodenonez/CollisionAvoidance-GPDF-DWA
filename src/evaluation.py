@@ -62,7 +62,14 @@ class Evaluator:
             with open(save_path, 'w') as f:
                 json.dump(total_results, f)
 
-
+        if len(solve_mmp_time_list) < 5:
+            solve_mmp_time_list = [-1]*10
+        if len(solve_mpc_time_list) < 5:
+            solve_mpc_time_list = [-1]*10
+        if len(clearance_results) == 0:
+            clearance_results = [-1]*10
+        if len(clearance_dyn_results) == 0:
+            clearance_dyn_results = [-1]*10
         print('='*10, f'Robot {robot_id}', '='*10)
         print('MMP solve time mean/max:',
               round(np.mean(np.array(solve_mmp_time_list[5:])), 3), '/', # warm up
@@ -131,9 +138,12 @@ class Evaluator:
 
     def calc_minimal_obstacle_distance(self, robot_id: int, num_repeat: int, trajectory: list[tuple], obstacles: list[list[tuple]]):
         dist_list = []
-        for pos in trajectory:
-            dist_list.append(min([Polygon(obs).distance(Point(pos)) for obs in obstacles]))
-        self.eval_results[robot_id]["clearance_results"][num_repeat] = min(dist_list)
+        if obstacles:
+            for pos in trajectory:
+                dist_list.append(min([Polygon(obs).distance(Point(pos)) for obs in obstacles]))
+            self.eval_results[robot_id]["clearance_results"][num_repeat] = min(dist_list)
+        else:
+            self.eval_results[robot_id]["clearance_results"][num_repeat] = -1
 
     def calc_minimal_dynamic_obstacle_distance(self, robot_id: int, num_repeat: int, state: np.ndarray, obstacles: list[tuple]):
         """Call this function at each time step."""

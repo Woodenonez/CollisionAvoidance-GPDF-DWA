@@ -146,7 +146,7 @@ def infer_gpdf_grad(model, coords, query):
 def train_gpdf(coords) -> jax.Array:
     coords = jp.array(coords)
     K = cov(coords, coords)
-    y = jp.ones((len(coords), 1)) # all boundary points are at distance 1
+    y = jp.ones((len(coords), 1)) # observed distance (which is the mean of the GP)
     model = jp.linalg.solve(K, y)
     return model
 

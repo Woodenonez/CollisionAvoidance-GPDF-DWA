@@ -8,6 +8,7 @@ from typing import Optional, Union
 import numpy as np
 import matplotlib.pyplot as plt # type: ignore
 from matplotlib.axes import Axes # type: ignore
+import matplotlib.cm as cm # type: ignore
 
 from configs import MpcConfiguration
 from configs import DwaConfiguration
@@ -456,13 +457,15 @@ class MainBase:
                     viz = self.main_plotter.map_ax.plot(tr[:, 0], tr[:, 1], 'gray', alpha=0.3)[0]
                     tracker_viz.append(viz)
                 for tr, c in zip(ok_trajs, ok_cost):
-                    c_normalized = (c - min(ok_cost)) / (max(ok_cost) - min(ok_cost) + 1e-3)
-                    alpha = (1 - c_normalized) * 0.5
-                    viz = self.main_plotter.map_ax.plot(tr[:, 0], tr[:, 1], 'b', alpha=alpha)[0]
+                    # c_normalized = (c - min(ok_cost)) / (max(ok_cost) - min(ok_cost) + 1e-3)
+                    c_normalized = min(1, (c - min(ok_cost)) / (1.5*min(ok_cost)))
+                    color = cm.autumn(c_normalized)
+                    alpha = (1 - c_normalized) * 0.8
+                    viz = self.main_plotter.map_ax.plot(tr[:, 0], tr[:, 1], color=color, alpha=alpha, linewidth=3)[0]
                     # viz_text = self.main_plotter.map_ax.text(tr[-1][0], tr[-1][1], f'{round(c,2)}', fontsize=8, color='m')
                     tracker_viz.append(viz)
                     # tracker_viz.append(viz_text)
-                viz = self.main_plotter.map_ax.plot(np.asarray(pred_states)[:, 0], np.asarray(pred_states)[:, 1], 'r', linewidth=3)[0]
+                viz = self.main_plotter.map_ax.plot(np.asarray(pred_states)[:, 0], np.asarray(pred_states)[:, 1], 'm', linewidth=5)[0]
                 tracker_viz.append(viz)
             ctr, ctrf, map_quiver = None, None, None
             if self.tracker_type == 'dwa-gpdf' or self.planner_type == 'dwa-gpdf':
@@ -479,14 +482,13 @@ class MainBase:
                     exclude_index=f'other_robots_{rid}',
                 )
             boundary_np = np.asarray(self._map_boundary)
-            # zoom_in = [np.min(boundary_np[:, 0])-0.1, np.max(boundary_np[:, 0])+0.1, np.min(boundary_np[:, 1])-0.1, np.max(boundary_np[:, 1])+0.1]
-            # zoom_in = [2, 10, 1, 7] # for (1, 3, 1) concept plotting
-            # zoom_in = [-1, 11, -1, 11] # for (3, 1, 1) 
+            zoom_in = [np.min(boundary_np[:, 0])-0.1, np.max(boundary_np[:, 0])+0.1, np.min(boundary_np[:, 1])-0.1, np.max(boundary_np[:, 1])+0.1]
+            zoom_in = [2, 10, 1, 7]
             self.main_plotter.plot_in_loop(
                 dyn_obstacle_list=None, 
                 time=current_time, 
                 autorun=auto_run, 
-                # zoom_in=zoom_in, 
+                zoom_in=zoom_in, 
                 # save_path=f'Demo/{int(current_time/self.config_tracker.ts)}.png',
                 temp_plots=sf_viz_list + [ctr, ctrf, map_quiver] + tracker_viz,
                 # temp_objects=debug_info['closest_obstacle_list']
@@ -604,7 +606,8 @@ if __name__ == '__main__':
             # tracker_type = 'dwa-gpdf' # 'mpc', 'dwa', 'dwa-pred', 'dwa-gpdf', 'rpp'
             planner_type = None # None, 'teb', 'dwa', 'dwa-pred', 'dwa-gpdf'
             # scenario_index = (2, 1, 3)
-            auto_run = True 
+            pedestrian_model = 'None' # None, 'sf', 'minisf'
+            auto_run = False 
             map_only = True
             save_video_name = None#f'./Demo/{scenario_index[0]}_{scenario_index[1]}_{scenario_index[2]}_{tracker_type}_{planner_type}.avi'
             evaluation = False
@@ -640,7 +643,7 @@ if __name__ == '__main__':
 
             mb = MainBase(scenario_index=scenario_index, evaluation=evaluation, map_only=map_only, save_video_name=save_video_name, verbose=False)
             mb.load(planner_type, cfg_planner_path, tracker_type, cfg_tracker_path, cfg_robot_path, cfg_human_path)
-            mb.prepare()
+            mb.prepare(pedestrian_model=pedestrian_model)
 
             # fig_debug, axes_debug = plt.subplots(1, 2) 
 
@@ -648,7 +651,7 @@ if __name__ == '__main__':
             if evaluation:
                 mb.report(save_dir='./')
 
-            print(f'Finish with tracker: {tracker_type}, planner: {planner_type}, scenario: {scenario_index}.')
+            print(f'Finish with tracker: {tracker_type}, planner: {planner_type}, scenario: {scenario_index}, human model: {pedestrian_model}.')
 
 
     
