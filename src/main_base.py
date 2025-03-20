@@ -11,7 +11,6 @@ from matplotlib.axes import Axes # type: ignore
 
 from configs import MpcConfiguration
 from configs import DwaConfiguration
-from configs import TebConfiguration
 from configs import CircularRobotSpecification
 from configs import PedestrianSpecification
 
@@ -25,7 +24,6 @@ from pkg_moving_object.moving_object import HumanObject, RobotObject
 from pkg_tracker_mpc.trajectory_tracker import TrajectoryTracker as TrajectoryTrackerMPC
 from pkg_tracker_dwa.trajectory_tracker import TrajectoryTracker as TrajectoryTrackerDWA
 from pkg_tracker_dwa.trajectory_tracker import TrajectoryPlanner as TrajectoryPlannerDWA
-from pkg_planner_teb.trajectory_planner import TrajectoryPlanner as TrajectoryPlannerTEB
 
 from visualizer.object import CircularObjectVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
@@ -63,7 +61,7 @@ class MainBase:
             self.config_tracker = DwaConfiguration.from_yaml(config_tracker_path)
             
         if self.planner_type == 'teb':
-            self.config_planner = TebConfiguration.from_yaml(config_planner_path)
+            self.config_planner = None
         elif self.planner_type in ['dwa', 'dwa-gpdf', 'dwa-pred']:
             self.config_planner = DwaConfiguration.from_yaml(config_planner_path)
         self.config_robot = CircularRobotSpecification.from_yaml(config_robot_path)
@@ -109,7 +107,6 @@ class MainBase:
             if self.tracker_type == 'mpc':
                 controller = TrajectoryTrackerMPC(self.config_tracker, self.config_robot, robot_id=rid, verbose=False)
                 controller.load_motion_model(robot.motion_model)
-                # controller.set_monitor(monitor_on=False)
             elif 'dwa' in self.tracker_type:
                 controller = TrajectoryTrackerDWA(self.config_tracker, self.config_robot, robot_id=rid, verbose=False)
                 controller.load_motion_model(robot.motion_model)
@@ -123,10 +120,6 @@ class MainBase:
                                    repeat=repeat)
 
     def _prepare_pedestrians(self, pedestrian_model:Optional[str]=None):
-        """
-        Args:
-            pedestrian_model: Can be `None` (non-interactive), 'sf' (social force).
-        """
         if self.vb:
             print(f'[{self.__class__.__name__}] Preparing agents...')
         self.pedestrian_model = pedestrian_model
@@ -152,25 +145,12 @@ class MainBase:
              planner_type: Optional[str], config_planner_path: str, 
              tracker_type: Optional[str], config_tracker_path: str, 
              config_robot_path: str, config_human_path: str):
-        """
-        Args:
-            planner_type: The type of the planner, 'none' or 'teb'.
-            tracker_type: The type of the trajectory tracker, 'mpc' or 'dwa'.
-        """
         self._planner_type = planner_type
         self._tracker_type = tracker_type
         self._load_config(config_planner_path, config_tracker_path, config_robot_path, config_human_path)
         print(f'[{self.__class__.__name__}] Loading complete!')
 
     def prepare(self, pedestrian_model:Optional[str]=None):
-        """Prepare the simulation (coordinator, robots, motion predictor, pedestrians)
-
-        Args:
-            motion_predictor_type: The type of the motion predictor, 'cvm', 'sgan', 'nll', 'enll', 'bce', 'kld'.
-            ref_image_path: The reference image to plot as the background.
-            model_suffix: The suffix of the model to load, used to quickly load different models.
-            pedestrian_model: The model for the pedestrian, can be `None` (non-interactive), 'sf' (social force).
-        """
         prt_process = 'Preparing: Coordinator'
         process_timer = timer()
         print(f'[{self.__class__.__name__}] {prt_process}', end=' ')
@@ -180,9 +160,9 @@ class MainBase:
         process_timer = timer()
         print(f'\r[{self.__class__.__name__}] {prt_process}', end=' ')
         self._prepare_robot_manager()
-        self.generic_planner:Optional[Union[TrajectoryPlannerTEB, TrajectoryPlannerDWA]] = None
+        self.generic_planner:Optional[Union[None, TrajectoryPlannerDWA]] = None
         if self.planner_type == 'teb':
-            self.generic_planner = TrajectoryPlannerTEB(self.config_planner, self.config_robot, safe_factor=3.0, safe_margin=0.1, verbose=self.vb)
+            self.generic_planner = None
         elif self.planner_type in ['dwa', 'dwa-gpdf']:
             self.generic_planner = TrajectoryPlannerDWA(self.config_planner, self.config_robot)
             self.generic_planner.load_motion_model(self.robot_manager.get_all_robots()[0].motion_model)
@@ -208,7 +188,6 @@ class MainBase:
                 self.main_plotter = MpcPlotInLoop(self.config_robot, map_only=self.map_only, save_to_path=self.save_video_name, save_params={'skip_frame': 0})
             else:
                 self.main_plotter = MpcPlotInLoop(self.config_robot, map_only=self.map_only)
-            # graph_manager = self.gpc.current_graph
             graph_manager = None
             self.main_plotter.plot_in_loop_pre(self.gpc.current_map, self.gpc.inflated_map, graph_manager)
             
@@ -267,20 +246,7 @@ class MainBase:
         print(f'[{self.__class__.__name__}] Reset the simulation!')
 
 
-    def run_one_step(self, current_time: float, num_repeat: int, extra_debug_panel:Optional[list[Axes]]=None, auto_run:bool=True):
-        """Run one step of the simulation.
-
-        Args:
-            current_time: The current time (real time but not time step).
-            num_repeat: The index of the current repeat.
-            extra_debug_panel: _description_. Defaults to None.
-
-        Returns:
-            clusters_list: A list (n=horizon) of clusters, each cluster is a list of points.
-            mu_list_list: A list of means of the clusters.
-            std_list_list: A list of standard deviations of the clusters.
-            conf_list_list: A list of confidence of the clusters.
-        """
+    def run_one_step(self, current_time: float, num_repeat: int, auto_run:bool=True):
         kt = current_time / self.config_tracker.ts
 
         ### Human step
@@ -352,10 +318,7 @@ class MainBase:
             else:
                 ref_states, ref_speed, *_ = planner.get_local_ref(kt*self.config_tracker.ts, (float(robot.state[0]), float(robot.state[1])), external_ref_speed=controller.base_speed)
             if self.planner_type == 'teb':
-                assert isinstance(self.generic_planner, TrajectoryPlannerTEB)
-                self.generic_planner.set_ref_states(robot.state, ref_states, ref_speed)
-                ref_states, _ = self.generic_planner.run_step(obstacles=dynamic_obstacles,
-                                                              obstacle_radius=self.config_human.human_width*1.5)
+                pass
             elif self.planner_type in ['dwa', 'dwa-gpdf', 'dwa-pred']:
                 assert isinstance(self.generic_planner, TrajectoryPlannerDWA)
                 self.generic_planner.load_init_states(robot.state, goal_state=self.robot_manager.get_goal_state(rid))
@@ -426,10 +389,7 @@ class MainBase:
 
             ### Check collisions
             other_states = [r.state for r in self.robot_manager.get_all_robots() if r.id_ != rid]
-            have_collision = self.evaluator.check_collision(rid, num_repeat, robot.state, other_states, self.static_obstacles, dynamic_obstacles)
-            # if have_collision:
-            #     print(f"COLLISION COST: {debug_info['cost']}")
-            #     input("Detect collision! Press Enter to continue...")
+
             if self.eval and dynamic_obstacles:
                 self.evaluator.calc_minimal_dynamic_obstacle_distance(rid, num_repeat, robot.state, dynamic_obstacles)
 
@@ -459,9 +419,7 @@ class MainBase:
                     c_normalized = (c - min(ok_cost)) / (max(ok_cost) - min(ok_cost) + 1e-3)
                     alpha = (1 - c_normalized) * 0.5
                     viz = self.main_plotter.map_ax.plot(tr[:, 0], tr[:, 1], 'b', alpha=alpha)[0]
-                    # viz_text = self.main_plotter.map_ax.text(tr[-1][0], tr[-1][1], f'{round(c,2)}', fontsize=8, color='m')
                     tracker_viz.append(viz)
-                    # tracker_viz.append(viz_text)
                 viz = self.main_plotter.map_ax.plot(np.asarray(pred_states)[:, 0], np.asarray(pred_states)[:, 1], 'r', linewidth=3)[0]
                 tracker_viz.append(viz)
             ctr, ctrf, map_quiver = None, None, None
@@ -478,31 +436,16 @@ class MainBase:
                     show_grad=True,
                     exclude_index=f'other_robots_{rid}',
                 )
-            boundary_np = np.asarray(self._map_boundary)
-            # zoom_in = [np.min(boundary_np[:, 0])-0.1, np.max(boundary_np[:, 0])+0.1, np.min(boundary_np[:, 1])-0.1, np.max(boundary_np[:, 1])+0.1]
-            # zoom_in = [2, 10, 1, 7] # for (1, 3, 1) concept plotting
-            # zoom_in = [-1, 11, -1, 11] # for (3, 1, 1) 
             self.main_plotter.plot_in_loop(
                 dyn_obstacle_list=None, 
                 time=current_time, 
                 autorun=auto_run, 
-                # zoom_in=zoom_in, 
-                # save_path=f'Demo/{int(current_time/self.config_tracker.ts)}.png',
                 temp_plots=sf_viz_list + [ctr, ctrf, map_quiver] + tracker_viz,
-                # temp_objects=debug_info['closest_obstacle_list']
             )
             for i, human in enumerate(self.humans):
                 self.human_visualizers[i].update(*human.state)
 
-    def run_once(self, repeat:int=1, time_step_out:Optional[float]=None, extra_debug_panel:Optional[list[Axes]]=None, auto_run:bool=True):
-        """Run the simulation once for a given number of repeats.
-
-        Args:
-            repeat: The number of repeats. Defaults to 1.
-            time_step_out: The time to stop the simulation if not None. Defaults to None.
-            extra_debug_panel: List of Axes for extra debug panel if not None. Defaults to None.
-            auto_run: If True, the plot will be updated automatically (without plt.waitforbuttonpress). Defaults to True.
-        """
+    def run_once(self, repeat:int=1, time_step_out:Optional[float]=None, auto_run:bool=True):
         self._prepare_evaluation(repeat=repeat)
         if repeat > 1 and self.viz:
             warnings.warn("Try to avoid visualization when repeat > 1.")
@@ -522,7 +465,6 @@ class MainBase:
             while (not total_complete) and (not any_collision):
                 self.run_one_step(current_time=current_time,
                                   num_repeat=i, 
-                                  extra_debug_panel=extra_debug_panel,
                                   auto_run=auto_run)
                 total_complete = all([self.evaluator.eval_results[rid]["complete_results"][i] for rid in self.robot_ids])
                 any_collision = any([self.evaluator.eval_results[rid]["collision_results"][i] for rid in self.robot_ids])
@@ -531,7 +473,7 @@ class MainBase:
                     break
                 current_time += self.config_tracker.ts
                 if self.viz:
-                    time.sleep(0.2)
+                    time.sleep(0.1)
                 else:
                     time.sleep(0.01)
 
@@ -602,11 +544,11 @@ if __name__ == '__main__':
     for tracker_type in tracker_type_list:
         for scenario_index in scenario_index_list:
             # tracker_type = 'dwa-gpdf' # 'mpc', 'dwa', 'dwa-pred', 'dwa-gpdf', 'rpp'
-            planner_type = None # None, 'teb', 'dwa', 'dwa-pred', 'dwa-gpdf'
+            planner_type = None # None, 'dwa', 'dwa-pred', 'dwa-gpdf'
             # scenario_index = (2, 1, 3)
             auto_run = True 
             map_only = True
-            save_video_name = None#f'./Demo/{scenario_index[0]}_{scenario_index[1]}_{scenario_index[2]}_{tracker_type}_{planner_type}.avi'
+            save_video_name = None
             evaluation = False
             repeat = 1
             time_step = 50.0 # seconds. 200 for long-term, 50 for short-term
@@ -616,8 +558,6 @@ if __name__ == '__main__':
             ### Check planner type
             if planner_type is None:
                 cfg_planner_path = 'none'
-            elif planner_type == 'teb':
-                cfg_planner_path = os.path.join(project_dir, 'config', 'teb.yaml')
             elif planner_type in ['dwa', 'dwa-gpdf', 'dwa-pred']:
                 cfg_planner_path = os.path.join(project_dir, 'config', 'dwa.yaml')
             else:
@@ -642,9 +582,7 @@ if __name__ == '__main__':
             mb.load(planner_type, cfg_planner_path, tracker_type, cfg_tracker_path, cfg_robot_path, cfg_human_path)
             mb.prepare()
 
-            # fig_debug, axes_debug = plt.subplots(1, 2) 
-
-            mb.run_once(repeat=repeat, time_step_out=time_step, extra_debug_panel=None, auto_run=auto_run)
+            mb.run_once(repeat=repeat, time_step_out=time_step, auto_run=auto_run)
             if evaluation:
                 mb.report(save_dir='./')
 
