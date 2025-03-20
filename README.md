@@ -2,6 +2,8 @@
 For safe and flexible navigation in multi-robot systems, this work presents an enhanced and predictive sampling-based trajectory planning approach in complex environments, the Gradient Field-based Dynamic Window Approach (GF-DWA). 
 Building upon the dynamic window approach, the proposed method utilizes gradient information of obstacle distances as a new cost term to anticipate potential collisions. This enhancement enables the robot to improve awareness of obstacles, including those with non-convex shapes. 
 
+The GPDF part is based on [this work](https://github.com/cr139139/gpdf-demo). The permission to use and extend the original GPDF code has been granted by its author.
+
 ## Publication
 The paper is under review ...
 Bibtex citation:
