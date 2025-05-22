@@ -470,7 +470,7 @@ class MainBase:
             ctr, ctrf, map_quiver = None, None, None
             if self.tracker_type == 'dwa-gpdf' or self.planner_type == 'dwa-gpdf':
                 gpdf_map_resolution = (100, 100)
-                ctr, ctrf, map_quiver = self.gpdf_env.plot_env(
+                ctr, ctrf, map_quiver, _ = self.gpdf_env.plot_env(
                     self.main_plotter.map_ax,
                     x_range=(min([x[0] for x in self._map_boundary]), max([x[0] for x in self._map_boundary])),
                     y_range=(min([x[1] for x in self._map_boundary]), max([x[1] for x in self._map_boundary])),

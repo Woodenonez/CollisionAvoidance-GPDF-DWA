@@ -119,8 +119,8 @@ class GPDFEnv:
 
     
     def plot_env(self, ax: Axes, x_range: tuple, y_range: tuple, map_resolution=(100, 100), color='k', plot_grad_dir=False, obstacle_idx=-1, show_grad=False, exclude_index=None):
-        _x = np.linspace(x_range[0], x_range[1], map_resolution[0])
-        _y = np.linspace(y_range[0], y_range[1], map_resolution[1])
+        _x = np.linspace(x_range[0], x_range[1], map_resolution[1])
+        _y = np.linspace(y_range[0], y_range[1], map_resolution[0])
         ctr_level = 20 # default 20
         
         X, Y = np.meshgrid(_x, _y)
@@ -138,5 +138,5 @@ class GPDFEnv:
         else:
             ctr = ax.contour(X, Y, dis_mat, [0], colors=color, linewidths=1.5)
             ctrf = ax.contourf(X, Y, dis_mat, [0, 0.1], colors=['orange','white'], extend='min', alpha=.3)
-        return ctr, ctrf, quiver
+        return ctr, ctrf, quiver, dis_mat
     
