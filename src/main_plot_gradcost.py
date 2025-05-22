@@ -74,7 +74,7 @@ ax.quiver(
     # headaxislength=0, headlength=0, headwidth=0,
 )
 
-ctr, ctrf, map_quiver = gpdf_env.plot_env(
+ctr, ctrf, map_quiver, _ = gpdf_env.plot_env(
     ax,
     x_range=(min([x[0] for x in boundary]), max([x[0] for x in boundary])),
     y_range=(min([x[1] for x in boundary]), max([x[1] for x in boundary])),
