@@ -5,7 +5,8 @@ Building upon the dynamic window approach, the proposed method utilizes gradient
 The GPDF part is based on [this work](https://github.com/cr139139/gpdf-demo). The permission to use and extend the original GPDF code has been granted by its author.
 
 ## Publication
-The paper is under review ...
+The paper is accepted by IROS 2025.
+
 Bibtex citation:
 ```
 NOT YET
