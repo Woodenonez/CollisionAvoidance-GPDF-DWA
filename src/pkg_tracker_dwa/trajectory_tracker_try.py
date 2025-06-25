@@ -145,31 +145,34 @@ class TrajectoryTracker:
         current_dir = math.atan2(trajectory[-1, 1] - trajectory[0, 1], trajectory[-1, 0] - trajectory[0, 0])
         cost_angle = abs(math.atan2(math.sin(desired_dir - current_dir), 
                                     math.cos(desired_dir - current_dir)))
+        cost_angle_normalized = cost_angle / (np.pi+1e-6)
+        
         min_dist = np.min(np.linalg.norm(trajectory[:,:2] - goal_state[:2], axis=1))
-        extra_cost = 0.0
-        if min_dist > 0.1:
-            extra_cost = 10.0
-        return cost_angle * self.config.q_goal_dir + extra_cost
+        if min_dist < 0.1:
+            return -10 + cost_angle_normalized * self.config.q_goal_dir
+        
+        return cost_angle_normalized * self.config.q_goal_dir
 
     def calc_cost_speed(self, action: np.ndarray):
-        return abs(action[0] - self.base_speed) * self.config.q_speed
+        cost_speed = abs(action[0] - self.base_speed)
+        cost_speed_normalized = min(1.0, cost_speed / self.base_speed)  # Normalize speed difference
+        return cost_speed_normalized * self.config.q_speed
 
     def calc_cost_ref_deviation(self, trajectory: np.ndarray, ref_traj: np.ndarray):
         """Calculate the cost based on the reference trajectory."""
         dists = np.linalg.norm(trajectory[:, :2] - ref_traj[:, :2], axis=1)
-        cost = np.sum(dists)/self.N_hor * self.config.q_ref_deviation
-        if np.max(dists) > 5.0:
-            return cost + 10.0
-        return cost
+        cost_refdev = np.max(dists)
+        cost_refdev_normalized = cost_refdev / 5.0
+        return cost_refdev_normalized * self.config.q_ref_deviation
 
 
-    def calc_cost_static_obstacles(self, trajectory: np.ndarray, static_obstacles: list[list[tuple]], min_safe_dist:float, thre: float):
+    def calc_cost_static_obstacles(self, trajectory: np.ndarray, static_obstacles: list[list[tuple]], thre:float=1.0):
         if len(static_obstacles) == 0:
             return 0.0
         dists_to_obs = []
         for obs in static_obstacles:
             dists = utils_geo.lineseg_dists(trajectory[:,:2], np.array(obs), np.array(obs[1:] + [obs[0]]))
-            if np.min(dists) < min_safe_dist:
+            if np.min(dists) < self.robot_spec.vehicle_width/2:
                 return np.inf
             dists_to_obs.append(np.min(dists))
         min_dist = np.min(dists_to_obs)
@@ -177,18 +180,18 @@ class TrajectoryTracker:
             return 0.0
         return 1.0 / min_dist * self.config.q_stc_obstacle
     
-    def calc_cost_dynamic_obstacles(self, trajectory: np.ndarray, dynamic_obstacles: list[tuple], min_safe_dist:float, thre: float):
+    def calc_cost_dynamic_obstacles(self, trajectory: np.ndarray, dynamic_obstacles: list[tuple], thre:float=1.0):
         set1 = np.expand_dims(trajectory[:, :2], axis=1)
         set2 = np.expand_dims(np.array(dynamic_obstacles), axis=0)
         distances = np.sqrt(np.sum((set1 - set2)**2, axis=-1))
         min_distances = np.min(distances)
         if min_distances > thre + self.robot_spec.social_margin:
             return 0.0
-        if min_distances < min_safe_dist:
+        if min_distances < self.robot_spec.vehicle_width:
             return np.inf
         return 1.0 / min_distances * self.config.q_dyn_obstacle
 
-    def calc_cost_dynamic_obstacles_steps(self, trajectory: np.ndarray, dynamic_obstacles: list[list[tuple]], min_safe_dist:float, thre: float):
+    def calc_cost_dynamic_obstacles_steps(self, trajectory: np.ndarray, dynamic_obstacles: list[list[tuple]], thre:float=1.0):
         all_step_min_distances = []
         if len(dynamic_obstacles) == 0:
             return 0.0
@@ -197,7 +200,7 @@ class TrajectoryTracker:
             set2 = np.expand_dims(np.array(obs), axis=0)
             distances = np.sqrt(np.sum((set1 - set2)**2, axis=-1))
             min_distances = np.min(distances) * np.sqrt(i+1)
-            if min_distances < min_safe_dist:
+            if min_distances < self.robot_spec.vehicle_width:
                 return np.inf
             all_step_min_distances.append(min_distances)
         
@@ -206,84 +209,77 @@ class TrajectoryTracker:
         return 1.0 / np.min(all_step_min_distances) * self.config.q_dyn_obstacle
 
 
-    def calc_cost_gdf(self, traj: np.ndarray, dist_set: np.ndarray, grad_set: Optional[np.ndarray], min_safe_dist:float, thre:float=0.0):
+    def calc_cost_gdf(self, traj: np.ndarray, dist_set: np.ndarray, grad_set: Optional[np.ndarray], min_safe_dist:float, thre:float=1.0):
         def angle_process(angle: float) -> float:
             return np.exp(2 * angle) - 1
         
-        if grad_set is not None:
-            grad_set_normalized = grad_set / np.linalg.norm(grad_set, axis=1, keepdims=True)
-            sa_min = np.radians(120)
-            dire = np.concatenate((np.cos(traj[:, 2]).reshape(-1, 1), np.sin(traj[:, 2]).reshape(-1, 1)), axis=1)
-            cos_angle = np.clip(np.sum(dire * grad_set_normalized, axis=1), -1, 1) # clip for numerical stability
-            safety_angle = abs(np.arccos(cos_angle))
-            safety_angle_pow = safety_angle-sa_min
-            safety_angle_pow[safety_angle_pow < 0] = 0
-            safety_angle_pow[np.isnan(safety_angle_pow)] = 0
-            safety_angle_pow = angle_process(safety_angle_pow)
+        sa_min = np.radians(120)
+        dire = np.concatenate((np.cos(traj[:, 2]).reshape(-1, 1), np.sin(traj[:, 2]).reshape(-1, 1)), axis=1)
+        cos_angle = np.clip(np.sum(dire * grad_set, axis=1), -1, 1) # clip for numerical stability
+        safety_angle = abs(np.arccos(cos_angle))
+        safety_angle_pow = safety_angle-sa_min
+        safety_angle_pow[safety_angle_pow < 0.0] = 0.0
+        safety_angle_pow[np.isnan(safety_angle_pow)] = 0.0
+        safety_angle_pow = angle_process(safety_angle_pow)
 
-            sa_cost = safety_angle_pow
-            sa_cost[sa_cost < sa_min] = sa_min
-            sa_cost = (sa_cost - sa_min) / (np.radians(180) - sa_min) #* (np.linspace(1, 0.5, len(sa_cost))) 
-
-            dist_set_w = safety_angle_pow / angle_process(np.pi - sa_min)
-        else:
-            sa_cost = np.zeros(len(dist_set))
-            dist_set_w = np.ones(len(dist_set))
+        sa_cost_normalized = np.max(safety_angle_pow) / angle_process(np.pi - sa_min)
 
         min_dist = np.min(dist_set)
         if min_dist < min_safe_dist:
-            return np.inf, np.inf, sa_cost
+            return np.inf, np.inf
         if min_dist > thre:
-            return 0.0, 0.0, sa_cost
-        dist_cost = 1.0 / min_dist * self.config.q_stc_obstacle
-        dist_cost_weighted = np.max((1.0 / dist_set) * dist_set_w) * self.config.q_stc_obstacle
+            return 0.0, 0.0
+        dist_set_w = safety_angle_pow / angle_process(np.pi - sa_min)
+        dist_cost = np.max((1.0 / dist_set) * dist_set_w) * self.config.q_stc_obstacle
 
-        return dist_cost, dist_cost_weighted, sa_cost
+        return dist_cost, sa_cost_normalized
 
 
-    def calc_traj_cost(self, trajectory: np.ndarray, action: np.ndarray,
-                       static_obstacles: Optional[list[list[tuple]]]=None, dynamic_obstacles: Optional[Union[list[PathNode], list[list[PathNode]]]]=None,
-                       dist_set:Optional[np.ndarray]=None, grad_set:Optional[np.ndarray]=None,
-                       verbose:bool=False) -> float:
+    def calc_traj_cost(self, trajectory: np.ndarray, action: np.ndarray, ref_path: np.ndarray, goal_state: np.ndarray, 
+                             static_obstacles: Optional[list[list[tuple]]], dynamic_obstacles: Optional[Union[list[PathNode], list[list[PathNode]]]]) -> float:
         cost_speed = self.calc_cost_speed(action)
-        cost_goal_dir = self.calc_cost_goal_direction(trajectory, self.final_goal)
-        cost_ref_deviation = self.calc_cost_ref_deviation(trajectory, np.array(self.ref_states))
+        cost_goal_dir = self.calc_cost_goal_direction(trajectory, goal_state)
+        cost_ref_deviation = self.calc_cost_ref_deviation(trajectory, ref_path)
         cost_static_obs = 0.0
         cost_dynamic_obs = 0.0
+        safe_thre = self.robot_spec.vehicle_width + self.robot_spec.vehicle_margin
+        if static_obstacles is not None:
+            cost_static_obs = self.calc_cost_static_obstacles(trajectory, static_obstacles, thre=10) # type: ignore
+        if dynamic_obstacles is not None:
+            if np.array(dynamic_obstacles).ndim == 2:
+                cost_dynamic_obs = self.calc_cost_dynamic_obstacles(trajectory, dynamic_obstacles, thre=safe_thre) # type: ignore
+            elif np.array(dynamic_obstacles).ndim == 3:
+                cost_dynamic_obs = (
+                    self.calc_cost_dynamic_obstacles_steps(trajectory, dynamic_obstacles[1:], thre=safe_thre) + # type: ignore
+                    self.calc_cost_dynamic_obstacles(trajectory, dynamic_obstacles[0], thre=safe_thre) # type: ignore
+                )
+            else:
+                cost_dynamic_obs = 0.0
+
+        if cost_static_obs + cost_dynamic_obs < 0.1:
+            cost_ref_deviation *= 10
+        total_cost = cost_speed + cost_goal_dir + cost_ref_deviation + cost_static_obs + cost_dynamic_obs
+        return total_cost
+    
+    def calc_traj_cost_gdf(self, trajectory: np.ndarray, action: np.ndarray, 
+                                  dist_set:Optional[np.ndarray], grad_set:Optional[np.ndarray]) -> float:
+        cost_speed = self.calc_cost_speed(action)
+        cost_goal_dir = self.calc_cost_goal_direction(trajectory, self.final_goal)
+        cost_ref_deviation = self.calc_cost_ref_deviation(trajectory, self.ref_states)
         cost_gpdf_obs = 0.0
         safe_thre = self.robot_spec.vehicle_width + self.robot_spec.vehicle_margin
-        min_safe_dist = self.robot_spec.vehicle_width/2*1.5
-        ### Feild-based cost
-        if (dist_set is not None) and (grad_set is not None) and (len(dist_set[dist_set<np.inf]) > 0):
-            dist_cost, dist_cost_weighted, sa_cost = self.calc_cost_gdf(
+        if dist_set is not None and len(dist_set[dist_set<np.inf]) > 0:
+            dist_cost, sa_cost = self.calc_cost_gdf(
                 trajectory, dist_set, grad_set, 
-                min_safe_dist=min_safe_dist,
-                thre=safe_thre)
-            sa_cost = np.sum(sa_cost)
-            cost_gpdf_obs = dist_cost #+ sa_cost # TODO
-            total_cost = cost_speed + cost_goal_dir + cost_ref_deviation + cost_gpdf_obs
-            if verbose and total_cost < np.inf:
-                print(f"[{self.__class__.__name__}-{self.robot_id}] Cost: {total_cost:.2f}, Speed: {cost_speed:.2f}, Goal: {cost_goal_dir:.2f}, Ref: {cost_ref_deviation:.2f}, Dist: {dist_cost:.2f}, SA: {sa_cost:.2f}")
-        ### Obstacle-based cost
-        else:
-            if static_obstacles is not None:
-                cost_static_obs = self.calc_cost_static_obstacles(trajectory, static_obstacles, min_safe_dist=min_safe_dist, thre=safe_thre) # type: ignore
-            if dynamic_obstacles is not None:
-                if np.array(dynamic_obstacles).ndim == 2:
-                    cost_dynamic_obs = self.calc_cost_dynamic_obstacles(trajectory, dynamic_obstacles, min_safe_dist=min_safe_dist, thre=safe_thre) # type: ignore
-                elif np.array(dynamic_obstacles).ndim == 3:
-                    cost_dynamic_obs = (
-                        self.calc_cost_dynamic_obstacles_steps(trajectory, dynamic_obstacles[1:], min_safe_dist=min_safe_dist, thre=safe_thre) + # type: ignore
-                        self.calc_cost_dynamic_obstacles(trajectory, dynamic_obstacles[0], min_safe_dist=min_safe_dist, thre=safe_thre) # type: ignore
-                    )
-                else:
-                    cost_dynamic_obs = 0.0
-            if cost_static_obs + cost_dynamic_obs < 0.1:
-                cost_ref_deviation *= 10
-            total_cost = cost_speed + cost_goal_dir + cost_ref_deviation + cost_static_obs + cost_dynamic_obs
-            if verbose and total_cost < np.inf:
-                print(f"[{self.__class__.__name__}-{self.robot_id}] Cost: {total_cost:.2f}, Speed: {cost_speed:.2f}, Goal: {cost_goal_dir:.2f}, Ref: {cost_ref_deviation:.2f}, Obs: {cost_static_obs:.2f}/{cost_dynamic_obs:.2f}")
+                min_safe_dist=self.robot_spec.vehicle_width/2,
+                thre=10)
+            cost_gpdf_obs = dist_cost + sa_cost*0
+
+        total_cost = cost_speed + cost_goal_dir + cost_ref_deviation + cost_gpdf_obs
+        if total_cost < np.inf:
+            print(f"[{self.__class__.__name__}-{self.robot_id}] Cost: {total_cost:.2f}, Speed: {cost_speed:.2f}, Goal: {cost_goal_dir:.2f}, Ref: {cost_ref_deviation:.2f}, Dist: {dist_cost:.2f}, SA: {sa_cost:.2f}")
         return total_cost
+
 
     def set_work_mode(self, mode:str='safe', use_predefined_speed:bool=True):
         """Set the basic work mode (base speed and weight parameters) of the MPC solver.
@@ -360,14 +356,37 @@ class TrajectoryTracker:
         return self._idle
 
 
-    def run_step(self, 
-                 enable_gdf: bool,
-                 gpdf_env: Optional[GPDFEnv]=None,
-                 esdf_env: Optional[EuclideanSDF]=None,
-                 static_obstacles: Optional[list[list[PathNode]]]=None, 
-                 dyn_obstacle_list: Optional[Union[list[tuple], list[list[tuple]]]]=None, 
+    def run_step(self,
+                 enable_gdf:bool=False,
+                 static_obstacles:Optional[list[list[PathNode]]]=None,
+                 dyn_obstacle_list:Optional[Union[list[tuple], list[list[tuple]]]]=None,
                  other_robot_states:Optional[list]=None,
+                 gpdf_env:Optional[GPDFEnv]=None,
+                 esdf_env:Optional[EuclideanSDF]=None,
                  last_action:Optional[np.ndarray]=None):
+        """Run the trajectory planner for one step. If enable_gpdf is True, use GPDF to calculate the cost.
+
+        Returns:
+            best_u: The best action to take.
+            best_trajectory: The predicted trajectory.
+            ref_states: The reference states.
+            debug_info: Debug information.
+        """
+        if enable_gdf:
+            if gpdf_env is None and esdf_env is None:
+                raise ValueError("The GPDF or ESDF environment should be provided.")
+            if gpdf_env is not None:
+                return self.run_step_gpdf(gpdf_env, last_action)
+            elif esdf_env is not None:
+                return self.run_step_esdf(esdf_env, last_action)
+        else:
+            return self.run_step_regular(static_obstacles, dyn_obstacle_list, other_robot_states, last_action)
+
+    def run_step_regular(self, 
+                         static_obstacles: Optional[list[list[PathNode]]], 
+                         dyn_obstacle_list: Optional[Union[list[tuple], list[list[tuple]]]], 
+                         other_robot_states:Optional[list]=None,
+                         last_action:Optional[np.ndarray]=None):
         """Run the trajectory planner for one step.
 
         Returns:
@@ -376,10 +395,77 @@ class TrajectoryTracker:
             ref_states: The reference states.
             debug_info: Debug information.
         """
-        if not enable_gdf:
-            gpdf_env = None
-            esdf_env = None
 
+        ### Correct the reference speed ###
+        dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
+        if dist_to_goal < self.base_speed*self.N_hor*self.ts:
+            self.base_speed = min(2 * dist_to_goal / self.N_hor / self.ts, self.robot_spec.lin_vel_max)
+
+        min_cost = float("inf")
+        x_init = self.state.copy()
+        best_u = np.zeros(self.nu)
+        best_trajectory = self.state.reshape(1, -1)
+        if last_action is not None:
+            last_u = last_action
+        else:
+            last_u = self.past_actions[-1] if len(self.past_actions) else np.zeros(self.nu)
+        all_trajectories = []
+        ok_trajectories = []
+        ok_costs = []
+
+        start_time = timer()
+        ### Get dynamic window ###
+        dw = self.calc_dynamic_window(last_u[0], last_u[1])
+
+        ### Get reference states ###
+        for v in np.arange(dw[0], dw[1]+self.config.vel_resolution, self.config.vel_resolution):
+            for w in np.arange(dw[2], dw[3]+self.config.ang_resolution, self.config.ang_resolution):
+                u = np.array([v, w])
+                trajectory = self.pred_trajectory(x_init, u)
+                all_trajectories.append(trajectory)
+                cost = self.calc_traj_cost(
+                    trajectory, 
+                    u, 
+                    np.array(self.ref_states), 
+                    self.final_goal, 
+                    static_obstacles, 
+                    dyn_obstacle_list,
+                )
+                if cost < np.inf:
+                    ok_trajectories.append(trajectory)
+                    ok_costs.append(cost)
+                if min_cost > cost:
+                    min_cost = cost
+                    best_u = u
+                    best_trajectory = trajectory
+                    if abs(best_u[0]) < self.config.stuck_threshold:
+                        best_u[1] = -self.robot_spec.ang_vel_max
+        solver_time = timer() - start_time
+
+        self.state = best_trajectory[0, :]
+        self.past_states.append(self.state)
+        self.past_actions += [best_u]
+        self.cost_timelist.append(cost)
+        self.solver_time_timelist.append(solver_time)
+        debug_info = DebugInfo(cost=min_cost, 
+                               all_trajectories=all_trajectories, 
+                               ok_trajectories=ok_trajectories, 
+                               ok_costs=ok_costs, 
+                               step_runtime=solver_time)
+
+        return best_u, best_trajectory, self.ref_states, debug_info
+
+    def run_step_gpdf(self, 
+                      gpdf_env: GPDFEnv,
+                      last_action:Optional[np.ndarray]=None):
+        """Run the trajectory planner for one step.
+
+        Returns:
+            best_u: The best action to take.
+            best_trajectory: The predicted trajectory.
+            ref_states: The reference states.
+            debug_info: Debug information.
+        """
         ### Correct the reference speed ###
         dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
         dist_to_end_ref = math.hypot(self.state[0]-self.ref_states[-1, 0], self.state[1]-self.ref_states[-1, 1])
@@ -403,45 +489,106 @@ class TrajectoryTracker:
         ok_costs = []
 
         start_time = timer()
-        
+        ### Get dynamic window ###
         dw = self.calc_dynamic_window(last_u[0], last_u[1])
+
+        ### Get reference states ###
         v_list = np.arange(dw[0], dw[1]+self.config.vel_resolution, self.config.vel_resolution)
-        w_list = np.arange(dw[2], dw[3]+self.config.ang_resolution, self.config.ang_resolution)
-        if not np.any(np.isclose(w_list, 0.0)):
-            w_list = np.sort(np.append(w_list, 0.0))
-
-        # v_list = np.array([np.max(v_list)]) # XXX
-        # w_list = np.array([0]) # XXX
-
+        w_list = np.arange(dw[2], dw[3]+self.config.vel_resolution, self.config.ang_resolution)
         all_u = np.array(np.meshgrid(v_list, w_list)).T.reshape(-1, 2) # N_u x 2
         for i in range(len(all_u)):
             u = all_u[i]
             trajectory = self.pred_trajectory(x_init, u)
             all_trajectories.append(trajectory)
-
-        dist_set_all, grad_set_all = None, None
-        if gpdf_env is not None:
-            all_trajectories_np = np.concatenate(all_trajectories, axis=0) # (N_hor+1)*N_traj x 3
-            dist_set_all, grad_set_all = gpdf_env.h_grad_vector(np.asarray(all_trajectories_np)[:, :2], exclude_index=f'other_robots_{self.robot_id}')
-        elif esdf_env is not None:
-            all_trajectories_np = np.concatenate(all_trajectories, axis=0) # (N_hor+1)*N_traj x 3
-            dist_set_all, grad_set_all = esdf_env.compute_distance_and_gradient(np.asarray(all_trajectories_np)[:, :2])
-
+        all_trajectories_np = np.concatenate(all_trajectories, axis=0) # (N_hor+1)*N_traj x 3
+        # start_time11 = timer()
+        dist_set_all, grad_set_all = gpdf_env.h_grad_vector(np.asarray(all_trajectories_np)[:, :2], exclude_index=f'other_robots_{self.robot_id}')
+        # print(f"[{self.__class__.__name__}-{self.robot_id}] GPDF time: {timer() - start_time11:.5f}s")
         for i, trajectory in enumerate(all_trajectories):
-            if dist_set_all is not None and grad_set_all is not None:
-                dist_set = dist_set_all[i*len(trajectory):(i+1)*len(trajectory)]
-                grad_set = grad_set_all[i*len(trajectory):(i+1)*len(trajectory)]
-            else:
-                dist_set, grad_set = None, None
-
             u = all_u[i]
-            cost = self.calc_traj_cost(
-                trajectory, u, 
-                static_obstacles=static_obstacles, 
-                dynamic_obstacles=dyn_obstacle_list,
-                dist_set=dist_set, grad_set=grad_set, 
-                verbose=False
-            )
+            dist_set = dist_set_all[i*len(trajectory):(i+1)*len(trajectory)]
+            grad_set = grad_set_all[i*len(trajectory):(i+1)*len(trajectory)]
+            cost = self.calc_traj_cost_gdf(trajectory, u, dist_set, grad_set)
+            if cost < np.inf:
+                ok_trajectories.append(trajectory)
+                ok_costs.append(cost)
+            if min_cost > cost:
+                min_cost = cost
+                best_u = u
+                best_trajectory = trajectory
+                if abs(best_u[0]) < self.config.stuck_threshold:
+                    best_u[1] = -self.robot_spec.ang_vel_max
+        
+        print('='*30)
+        solver_time = timer() - start_time
+
+        self.state = best_trajectory[0, :]
+        self.past_states.append(self.state)
+        self.past_actions += [best_u]
+        self.cost_timelist.append(min_cost)
+        self.solver_time_timelist.append(solver_time)
+        debug_info = DebugInfo(cost=min_cost, 
+                               all_trajectories=all_trajectories, 
+                               ok_trajectories=ok_trajectories, 
+                               ok_costs=ok_costs, 
+                               step_runtime=solver_time)
+
+        return best_u, best_trajectory, self.ref_states, debug_info
+
+    def run_step_esdf(self, 
+                      esdf_env: EuclideanSDF,
+                      last_action:Optional[np.ndarray]=None):
+        """Run the trajectory planner for one step.
+
+        Returns:
+            best_u: The best action to take.
+            best_trajectory: The predicted trajectory.
+            ref_states: The reference states.
+            debug_info: Debug information.
+        """
+        ### Correct the reference speed ###
+        dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
+        dist_to_end_ref = math.hypot(self.state[0]-self.ref_states[-1, 0], self.state[1]-self.ref_states[-1, 1])
+        dist_to_check = max(dist_to_goal, dist_to_end_ref)
+        if dist_to_check < self.base_speed*self.N_hor*self.ts:
+            new_speed = min(dist_to_check / self.N_hor / self.ts + 0.08, self.robot_spec.lin_vel_max)
+            self.set_work_mode(mode='work', use_predefined_speed=True)
+            if new_speed < self.base_speed:
+                self.base_speed = new_speed
+
+        min_cost = float("inf")
+        x_init = self.state.copy()
+        best_u = np.zeros(self.nu)
+        best_trajectory = self.state.reshape(1, -1)
+        if last_action is not None:
+            last_u = last_action
+        else:
+            last_u = self.past_actions[-1] if len(self.past_actions) else np.zeros(self.nu)
+        all_trajectories = []
+        ok_trajectories = []
+        ok_costs = []
+
+        start_time = timer()
+        ### Get dynamic window ###
+        dw = self.calc_dynamic_window(last_u[0], last_u[1])
+
+        ### Get reference states ###
+        v_list = np.arange(dw[0], dw[1]+self.config.vel_resolution, self.config.vel_resolution)
+        w_list = np.arange(dw[2], dw[3]+self.config.vel_resolution, self.config.ang_resolution)
+        all_u = np.array(np.meshgrid(v_list, w_list)).T.reshape(-1, 2) # N_u x 2
+        for i in range(len(all_u)):
+            u = all_u[i]
+            trajectory = self.pred_trajectory(x_init, u)
+            all_trajectories.append(trajectory)
+        all_trajectories_np = np.concatenate(all_trajectories, axis=0) # (N_hor+1)*N_traj x 3
+        # start_time = timer()
+        dist_set_all, grad_set_all = esdf_env.compute_distance_and_gradient(np.asarray(all_trajectories_np)[:, :2])
+        # print(f"[{self.__class__.__name__}-{self.robot_id}] ESDF time: {timer() - start_time:.5f}s")
+        for i, trajectory in enumerate(all_trajectories):
+            u = all_u[i]
+            dist_set = dist_set_all[i*len(trajectory):(i+1)*len(trajectory)]
+            grad_set = grad_set_all[i*len(trajectory):(i+1)*len(trajectory)]
+            cost = self.calc_traj_cost_gdf(trajectory, u, dist_set, grad_set)
             if cost < np.inf:
                 ok_trajectories.append(trajectory)
                 ok_costs.append(cost)
@@ -456,7 +603,7 @@ class TrajectoryTracker:
         self.state = best_trajectory[0, :]
         self.past_states.append(self.state)
         self.past_actions += [best_u]
-        self.cost_timelist.append(cost)
+        self.cost_timelist.append(min_cost)
         self.solver_time_timelist.append(solver_time)
         debug_info = DebugInfo(cost=min_cost, 
                                all_trajectories=all_trajectories, 

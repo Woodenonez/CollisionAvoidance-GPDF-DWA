@@ -7,7 +7,7 @@ jax.config.update('jax_platform_name', 'cpu')
 
 
 ### Parameter settings for Matern 1/2 GPIS
-D_OFFSET = 0.0
+D_OFFSET = -0.1
 L = 0.2
 
 

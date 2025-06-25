@@ -13,7 +13,7 @@ class GPDFEnv:
             margin: The margin for the distance function.
             rho: The rho value for the distance function.
         """
-        self.margin = margin
+        self.margin = margin # not used for now
         self.rho = rho
 
         self.gpdf_set:dict[Union[int, str], GPDF] = {}
@@ -27,8 +27,9 @@ class GPDFEnv:
         if gpdf is not None:
             self.gpdf_set[index] = gpdf
         elif pc_coords is not None:
+            pc_coords_unique = np.unique(np.array(pc_coords), axis=0)
             new_gpdf = GPDF()
-            new_gpdf.update_gpdf(pc_coords)
+            new_gpdf.update_gpdf(pc_coords_unique)
             self.gpdf_set[index] = new_gpdf
         else:
             raise ValueError("Either `gpdf` or `pc_coords` must be provided.")

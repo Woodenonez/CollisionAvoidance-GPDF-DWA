@@ -20,21 +20,18 @@ custom_cmap = mcolors.LinearSegmentedColormap.from_list("TransparentRed", colors
 
 
 def calc_cost_gpdf(traj: np.ndarray, dist_set: np.ndarray, grad_set: np.ndarray, min_safe_dist:float=0.0):
-    def angle_process(angle: float) -> float:
-            return np.exp(2 * angle) - 1
-    
     sa_min = np.radians(120)
+    sa_max = np.radians(180)
     dire = np.concatenate((np.cos(traj[:, 2]).reshape(-1, 1), np.sin(traj[:, 2]).reshape(-1, 1)), axis=1)
     cos_angle = np.clip(np.sum(dire * grad_set, axis=1), -1, 1) # clip for numerical stability
     safety_angle = abs(np.arccos(cos_angle))
     safety_angle_pow = safety_angle-sa_min
-    safety_angle_pow[safety_angle_pow < 0.0] = 0.0
-    safety_angle_pow[np.isnan(safety_angle_pow)] = 0.0
-    safety_angle_pow = angle_process(safety_angle_pow)
-
-    sa_cost = safety_angle_pow / angle_process(np.radians(180) - sa_min)
-    # sa_cost_w = 1 / dist_set
-    # sa_cost = np.sum(sa_cost)
+    safety_angle_pow[safety_angle_pow < 0] = 0
+    safety_angle_pow[np.isnan(safety_angle_pow)] = 0
+    safety_angle_pow = np.exp(2*safety_angle_pow) - 1
+    sa_cost = safety_angle_pow
+    sa_cost[sa_cost < sa_min] = sa_min
+    sa_cost = (sa_cost - sa_min) / (sa_max - sa_min)
     # sa_cost[dist_set > 1.0] = 0.0
     # sa_cost = np.sum(sa_cost) if len(sa_cost[sa_cost!=0]) > 0 else 0.0
     return sa_cost

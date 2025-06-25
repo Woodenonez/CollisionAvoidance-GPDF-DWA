@@ -27,7 +27,7 @@ vel_resolution: 0.3    # [m/s] The resolution of the velocity search space {Test
 ang_resolution: 0.08   # [rad/s] ~5 deg/s The resolution of the angular velocity search space {Test}
 stuck_threshold: 0.001  # [m] The threshold for the robot to be considered stuck
 q_goal_dir: 1.0        # The cost for the goal direction deviation
-q_ref_deviation: 0.3    # The cost for the reference path deviation
+q_ref_deviation: 0.1    # The cost for the reference path deviation
 q_speed: 8.0            # The cost for the speed deviation
 q_stc_obstacle: 2.0     # The cost for the static obstacle collision
 q_dyn_obstacle: 2.0     # The cost for the dynamic obstacle collision

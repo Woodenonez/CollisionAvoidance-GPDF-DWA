@@ -277,7 +277,7 @@ class RobotManager():
                                n_state: int, 
                                n_horizon: int, 
                                n_others: int, 
-                               sep=False, 
+                               sep=False, # whether to separate other robot states into a dict or a list
                                default:float=-10.0) -> Union[list[float], dict[int, list[float]]]:
         state_dim = n_state
         horizon = n_horizon
