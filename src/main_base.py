@@ -377,7 +377,7 @@ class MainBase:
                 
                 _, ref_states, _, _ = self.generic_planner.run_step(
                     enable_gdf=(self.planner_type in ['dwa-gpdf', 'dwa-esdf']),
-                    static_obstacles=self.static_obstacles,
+                    static_obstacles=self._map_obstacle_list,
                     dyn_obstacle_list=dyn_obstacle_list,
                     gpdf_env=self.gpdf_env if (self.planner_type=='dwa-gpdf') else None,
                     esdf_env=self.esdf_env if (self.planner_type=='dwa-esdf') else None,
@@ -406,7 +406,7 @@ class MainBase:
 
                 action, pred_states, current_refs, debug_info = controller.run_step(
                     enable_gdf=(self.tracker_type in ['dwa-gpdf', 'dwa-esdf']),
-                    static_obstacles=self.static_obstacles,
+                    static_obstacles=self._map_obstacle_list,
                     dyn_obstacle_list=dyn_obstacle_list,
                     gpdf_env=self.gpdf_env if (self.tracker_type=='dwa-gpdf') else None,
                     esdf_env=self.esdf_env if (self.tracker_type=='dwa-esdf') else None,
@@ -547,7 +547,7 @@ class MainBase:
                     break
                 current_time += self.config_tracker.ts
                 if self.viz:
-                    time.sleep(0.2)
+                    time.sleep(0.1)
                 else:
                     time.sleep(0.01)
 
@@ -558,7 +558,7 @@ class MainBase:
                     self.evaluator.calc_deviation_distance(rid, i, ref_traj=self.robot_manager.get_planner(rid).ref_traj, actual_traj=self.robot_manager.get_controller(rid).past_states)
 
             if not self.vb:
-                print() # print a new line
+                print()
 
             print(f'[{self.__class__.__name__}] Repeat {i+1} finished. Any collision: {any_collision}. All complete: {total_complete}. Timeout: {(not total_complete) and (not any_collision)}.')
 
@@ -618,27 +618,14 @@ if __name__ == '__main__':
 
     for tracker_type in tracker_type_list:
         for scenario_index in scenario_index_list:
-            # tracker_type = 'dwa-gpdf' # 'mpc', 'dwa', 'dwa-pred', 'dwa-gpdf', 'rpp'
-            planner_type = None # None, 'teb', 'dwa', 'dwa-pred', 'dwa-gpdf'
-            # scenario_index = (2, 1, 3)
             auto_run = True
             map_only = True
-            save_video_name = None#f'./Demo/{scenario_index[0]}_{scenario_index[1]}_{scenario_index[2]}_{tracker_type}_{planner_type}.avi'
+            save_video_name = None#f'./Demo/{scenario_index[0]}_{scenario_index[1]}_{scenario_index[2]}_{tracker_type}.avi'
             evaluation = False
             repeat = 1
             time_step = 30.0 # seconds. 200 for long-term, 50 for short-term
 
             project_dir = pathlib.Path(__file__).resolve().parents[1]
-
-            ### Check planner type
-            if planner_type is None:
-                cfg_planner_path = 'none'
-            elif planner_type == 'teb':
-                cfg_planner_path = os.path.join(project_dir, 'config', 'teb.yaml')
-            elif planner_type in ['dwa', 'dwa-gpdf', 'dwa-esdf', 'dwa-pred']:
-                cfg_planner_path = os.path.join(project_dir, 'config', 'dwa.yaml')
-            else:
-                raise ValueError(f'Invalid planner type: {planner_type}')
 
             ### Check tracker type
             if tracker_type == 'mpc':
@@ -656,16 +643,14 @@ if __name__ == '__main__':
             cfg_tf_path = os.path.join(project_dir, 'config', 'global_setting_warehouse.yaml')
 
             mb = MainBase(scenario_index=scenario_index, evaluation=evaluation, map_only=map_only, save_video_name=save_video_name, verbose=False)
-            mb.load(planner_type, cfg_planner_path, tracker_type, cfg_tracker_path, cfg_robot_path, cfg_human_path)
+            mb.load(None, 'none', tracker_type, cfg_tracker_path, cfg_robot_path, cfg_human_path)
             mb.prepare()
-
-            # fig_debug, axes_debug = plt.subplots(1, 2) 
 
             mb.run_once(repeat=repeat, time_step_out=time_step, extra_debug_panel=None, auto_run=auto_run)
             if evaluation:
                 mb.report(save_dir='./')
 
-            print(f'Finish with tracker: {tracker_type}, planner: {planner_type}, scenario: {scenario_index}.')
+            print(f'Finish with tracker: {tracker_type}, planner: {None}, scenario: {scenario_index}.')
 
 
     

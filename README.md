@@ -27,6 +27,7 @@ pip install -r requirements.txt
 ## Use Case
 There is no need to have any pre-training or pre-learned model. This method is off-the-shelf.
 Run *main_base.py* for the simulation (different scenarios and methods) in Python. The evaluation is activated by setting the *evaluation* variable to **True**.
+Change `scenario_index` and `tracker_type` in the code to select different scenarios and methods.
 
 To watch the demo videos:
 - Single-robot and multi-robot: [Link](https://youtu.be/Et4C5oGHlF0)

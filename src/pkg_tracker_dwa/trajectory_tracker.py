@@ -157,10 +157,10 @@ class TrajectoryTracker:
     def calc_cost_ref_deviation(self, trajectory: np.ndarray, ref_traj: np.ndarray):
         """Calculate the cost based on the reference trajectory."""
         dists = np.linalg.norm(trajectory[:, :2] - ref_traj[:, :2], axis=1)
-        cost = np.sum(dists)/self.N_hor * self.config.q_ref_deviation
+        dist_avg = np.sum(dists)/self.N_hor 
         if np.max(dists) > 5.0:
-            return cost + 10.0
-        return cost
+            return dist_avg * max(1.0, self.config.q_ref_deviation)
+        return dist_avg * self.config.q_ref_deviation
 
 
     def calc_cost_static_obstacles(self, trajectory: np.ndarray, static_obstacles: list[list[tuple]], min_safe_dist:float, thre: float):
@@ -184,7 +184,7 @@ class TrajectoryTracker:
         min_distances = np.min(distances)
         if min_distances > thre + self.robot_spec.social_margin:
             return 0.0
-        if min_distances < min_safe_dist:
+        if min_distances < min_safe_dist*2:
             return np.inf
         return 1.0 / min_distances * self.config.q_dyn_obstacle
 
@@ -197,7 +197,7 @@ class TrajectoryTracker:
             set2 = np.expand_dims(np.array(obs), axis=0)
             distances = np.sqrt(np.sum((set1 - set2)**2, axis=-1))
             min_distances = np.min(distances) * np.sqrt(i+1)
-            if min_distances < min_safe_dist:
+            if min_distances < min_safe_dist*1.5:
                 return np.inf
             all_step_min_distances.append(min_distances)
         
