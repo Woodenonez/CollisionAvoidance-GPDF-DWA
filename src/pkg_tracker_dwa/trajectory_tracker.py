@@ -260,7 +260,7 @@ class TrajectoryTracker:
                 min_safe_dist=min_safe_dist,
                 thre=safe_thre)
             sa_cost = np.sum(sa_cost)
-            cost_gpdf_obs = dist_cost #+ sa_cost # TODO
+            cost_gpdf_obs = dist_cost + sa_cost # TODO
             total_cost = cost_speed + cost_goal_dir + cost_ref_deviation + cost_gpdf_obs
             if verbose and total_cost < np.inf:
                 print(f"[{self.__class__.__name__}-{self.robot_id}] Cost: {total_cost:.2f}, Speed: {cost_speed:.2f}, Goal: {cost_goal_dir:.2f}, Ref: {cost_ref_deviation:.2f}, Dist: {dist_cost:.2f}, SA: {sa_cost:.2f}")
