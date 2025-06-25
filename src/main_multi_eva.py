@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt # type: ignore
 
 data_mpc_s1 = [96, 101, 110, 123, 136, 145, 149, 167, 199, 160] # fail: 0
 data_ddpg_s1 = [151, 128, 135, 170, 153, 150, 143, 125, 128, 178] # fail: 0
-data_dwa_s1 = [79, 79]
+data_dwa_s1 = [120, 120]
 data_gpdf_s1 = [84, 84] # fail: 0
 
 data_mpc_s2 = [154, 173, 88, 144, 147, 107, 139, 164, 88, 145] # fail: 2
